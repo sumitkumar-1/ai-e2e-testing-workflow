@@ -17,11 +17,14 @@ Sign in with AD credentials through the backend's Delinea integration, choose an
 ## Core decisions
 
 - Java backend with ordinary integration services; MCP is not required.
+- Modern, intuitive frontend built with plain HTML, CSS and vanilla JavaScript, with live progress and detailed execution feedback; no frontend framework or external CDN dependency.
+- Persistent embedded H2 for the initial single-backend deployment; PostgreSQL is not required.
 - AI selects operations through tool calling. Backend services perform the operations.
 - AD/Delinea authentication and secret exchanges happen entirely outside the AI module.
 - Tool configuration contains Delinea secret IDs and field mappings, never credential values.
 - Full integration API coverage is a goal scoped to actual installed versions; it is distinct from which operations a particular run may invoke.
 - Service knowledge and business expectations must be supplied explicitly. Do not invent internal APIs or service behavior.
+- Readable reports explain actual operations, expected/observed outcomes and supporting evidence. Publishing a Jira comment or wiki update requires explicit user approval of the previewed content and destination.
 
 Known platforms: Jira, Bitbucket/Stash, JFrog Artifactory, wiki, Grafana, CKP/Kubernetes, Helm, kubectl, and SMTP testing through an existing NioSmtpClient-based CLI or Swaks. Known environments: QA, Sandbox, Stable.
 

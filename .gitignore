@@ -12,3 +12,7 @@ dist/
 *.iml
 runtime-secrets/
 local-evidence/
+*.mv.db
+*.trace.db
+*.lock.db
+runtime-data/

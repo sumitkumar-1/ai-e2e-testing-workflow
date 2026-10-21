@@ -17,11 +17,11 @@ Use a modular Java backend with separate execution workers, rather than deployin
 Proposed stack, subject to company standards and version compatibility:
 
 - Company-supported Java LTS, Spring Boot, Maven multi-module build.
-- React and TypeScript frontend.
-- PostgreSQL for users, connection metadata, plans, workflow records, and evidence metadata.
+- Plain HTML, CSS and vanilla JavaScript frontend, served by the Java backend. No React, TypeScript build chain, UI framework, external CDN, web-font service or third-party browser library is required. Use native browser capabilities and locally hosted assets to minimize office library-approval dependencies.
+- H2 in persistent file-backed embedded mode for users, connection metadata, plans, workflow records and evidence metadata. PostgreSQL is not a prerequisite. H2 itself and backend dependencies still need to meet company approval requirements.
 - Delinea Secret Server for tool credentials; configuration/database stores secret IDs and field mappings only. AD-backed login obtains a user-scoped Delinea token held on the backend.
-- Object storage for reports, test outputs, traces, and evidence attachments.
-- Durable workflow engine with Java support; evaluate against existing infrastructure before selecting one. Requirements include persisted state, timers, cancellation, retries, and compensating cleanup.
+- Protected local artifact storage for reports, test outputs, traces and evidence attachments initially; an object-storage adapter is optional later.
+- Durable Java workflow execution with H2-backed state, timers, cancellation, bounded retries and compensating cleanup. Start with a persisted state machine and bounded executor in the application; do not introduce an external workflow engine that silently requires PostgreSQL or extra infrastructure. Re-evaluate an approved engine only when operational needs justify it.
 - Isolated container workers inside the corporate network for Helm, kubectl, SMTP CLI, and generated test execution.
 - AI provider adapter with one provider implemented first and a stable internal tool-call contract for additional providers.
 
@@ -37,6 +37,14 @@ Frontend -> Application API -> Durable verification workflow
 ```
 
 The AI proposes actions. The dispatcher validates and authorizes them. Integration services execute them. The workflow owns run state and recovery. Secrets never enter model prompts or tool definitions.
+
+### Initial H2 deployment and persistence
+
+Run one backend application instance owning the embedded database on durable local storage or a persistent volume. Multiple users and worker tasks access data through that application's APIs; separate worker processes do not directly open the database file. Use transactional job claiming, bounded concurrency, persisted operation IDs and recovery reconciliation to prevent duplicate actions after restart. Do not assume an embedded H2 file can support multiple application replicas through a shared filesystem.
+
+Use versioned schema migrations, defined retention and tested backup/restore procedures. Reserve in-memory H2 for disposable tests. Store large evidence files outside the database through an artifact-storage abstraction, with a protected local directory as the initial implementation and object storage optional. Disable the H2 web console outside explicit local development. Keep secrets out of business tables; any persisted authentication sessions require the protected encrypted session mechanism already specified.
+
+Acceptance: runs, configuration references and evidence metadata survive restart; interrupted operations reconcile safely; concurrent users remain isolated; backup restoration and schema upgrades are tested. Keep persistence behind Java interfaces so migration is possible if scale later exceeds this single-instance design, without making that migration part of the initial deployment.
 
 Suggested backend modules:
 
@@ -143,7 +151,7 @@ Track documented, implemented, contract-tested, and live-validated counts separa
 | Integration | API families to inventory | First verification slice |
 |---|---|---|
 | Delinea Secret Server | Version-specific authentication, token lifecycle, secret retrieval, templates and applicable access workflows | AD-backed user session and just-in-time secret resolution by configured ID; backend-only |
-| Jira | Issues, search, fields, comments, attachments, links, transitions, projects, agile modules, permissions and administration | Read ticket, acceptance criteria, linked work; draft/publish verification summary under policy |
+| Jira | Issues, search, fields, comments, attachments, links, transitions, projects, agile modules, permissions and administration | Read ticket, acceptance criteria, linked work; draft verification summary and publish only after explicit user approval |
 | Bitbucket/Stash | Projects, repositories, refs, commits, source, diffs, PRs, reviews, build/deployment metadata, hooks and permissions | Read PR/diff and files at pinned commits; associate artifacts |
 | Artifactory | Repositories, artifacts, metadata/properties, checksums, search/AQL, build info, transfer/promotion, permissions and administration | Resolve immutable artifact and build provenance |
 | Wiki | Product-specific search, pages/content, versions, attachments, spaces, permissions and administration | Retrieve relevant documentation with source revision |
@@ -195,7 +203,8 @@ Proposed application API families:
 /verification-runs/{id}/cancel request cancellation and cleanup
 /verification-runs/{id}/evidence authorized evidence access
 /verification-runs/{id}/report retrieve/export report
-/verification-runs/{id}/publish publish selected report under policy
+/verification-runs/{id}/publication-preview prepare exact Jira/wiki payload and target
+/verification-runs/{id}/publish publish user-approved payload to the approved target
 ```
 
 Proposed lifecycle:
@@ -281,6 +290,17 @@ Deliverables: initial service guides completed with SDETs, internal tool documen
 
 ## 7. Workstream E — frontend
 
+Implementation requirement: semantic HTML, modern CSS and vanilla JavaScript modules using native browser APIs. Serve assets locally; no framework or npm build is necessary to use the application. Prefer native fetch plus server-sent events for live progress, with a polling fallback and durable event IDs for reconnecting clients. Do not add dependencies merely for visual styling.
+
+Visual and interaction requirements:
+
+- Modern, intuitive layouts with consistent spacing, typography, colors, navigation, responsive panels and clear primary actions. Lightweight implementation must still provide a polished interface.
+- Accessible labels, keyboard navigation, visible focus, readable contrast and status text/icons that do not rely on color alone. Provide screen-reader status announcements without flooding the user.
+- Explicit empty/loading/success/error/blocked/canceling/reconnecting states. Preserve entered non-secret form data where appropriate and explain how to resolve errors.
+- Show current phase, completed/remaining planned steps, elapsed time, last activity and next expected action. Label estimates as estimates; avoid fabricated progress percentages.
+- Live updates remain understandable when the plan changes or a retry occurs. Display concise summaries with expandable technical detail and filters for failed/blocked steps.
+- Render externally sourced text safely using escaped text and controlled markup. Never execute HTML from ticket content, tool output or model-generated reports.
+
 Screens:
 
 1. Sign-in and profile: AD username/password prompt, configured domain/MFA handling, backend Delinea authentication, roles, provider selection and reauthentication state. No tool credential entry is required for Delinea-managed connections.
@@ -288,8 +308,8 @@ Screens:
 3. Environments: accessible environments, namespaces, service versions and reservation status.
 4. New verification: ticket, environment, build selection, notes and execution limits.
 5. Plan review: acceptance criteria, planned scenarios, changes, missing information and editable plan revisions.
-6. Live run: durable timeline, operation status, sanitized evidence, questions and cancel control.
-7. Results/history: criterion coverage, failures, reproduction steps, evidence links, cleanup status, export and authorized publication.
+6. Live run: durable timeline, detailed execution ledger, operation status, sanitized evidence, questions and cancel control. Each step shows what ran, why it was relevant, target environment/service, timestamps/duration, sanitized inputs, outcome, retries and evidence references.
+7. Results/history: readable summary and detailed criterion coverage, expected-versus-observed results, failures, reproduction steps, evidence links, cleanup status and exports. Include preview/edit/approve publication controls for a specific Jira comment or wiki page.
 8. Knowledge: service/library/tool documents, owners, versions and review state.
 9. API coverage/admin: implementation matrix, access policies, worker health and usage.
 
@@ -297,21 +317,31 @@ Do not expose raw implementation details unless needed to make a decision. Keep 
 
 ## 8. Evidence and documentation output
 
+Every execution must have a human-readable account of how its conclusion was reached. Record actual operations rather than only planned actions: API operation or sanitized command/test identifier, meaningful arguments, target, actor, start/end time, exit/response status, observations, retries and resulting assertion. Clearly distinguish executed, skipped, failed and simulated steps. Never include secret-bearing headers or command arguments. Explain decisions through concise action rationales and evidence references; do not request or display a model's hidden chain of thought.
+
 Each evidence item records run/scenario, source tool, acquisition time, relevant correlation IDs, artifact/config context, storage location and content hash. Preserve authorized original outputs according to retention policy and redact model-facing/user-facing copies as appropriate. Evidence permissions must not broaden source access.
 
 Report includes scope, provenance, criterion-to-test mapping, expected/observed outcomes, source evidence, product versus infrastructure failures, untested areas, reproduction procedure, and cleanup result.
 
-Provide HTML/Markdown and structured JSON initially. Other document formats can follow. Wiki updates and bug reports are drafts unless publication is explicitly authorized by the run/team policy. Preserve earlier reports when a run is repeated or a reviewer changes a conclusion.
+Provide formatted HTML/Markdown and structured JSON initially. Use a clear summary, requirement/scenario tables, expected-versus-observed comparisons, a chronological execution log, linked evidence, reproduction steps, uncovered cases and cleanup status. Long raw outputs should be collapsible or downloadable. Other document formats can follow. Preserve earlier reports when a run is repeated or a reviewer changes a conclusion.
+
+### User-approved Jira and wiki publication
+
+Publishing is an optional explicit user action after report generation. Neither the AI nor a standing team policy automatically publishes results. The user selects the Jira ticket/comment or wiki page/create-update action, previews the exact formatted content and attachment/link scope, optionally edits it, and approves that specific payload and destination.
+
+The backend records approver, payload hash/report revision, destination and approval time. Recheck destination permissions using the initiating user's Delinea-backed connection before writing. Any content/destination change invalidates prior approval. Use idempotency/publication records and reconcile uncertain responses to avoid duplicate comments or pages. For wiki updates, detect version conflicts rather than overwriting concurrent changes. A rejected, failed or canceled publication leaves the local report intact; show the outcome and the published URL when successful.
+
+Acceptance: no outbound Jira/wiki write without approval; edits require renewed approval; permission failure is clear; retry cannot silently duplicate output; published formatting is previewed and checked for supported target markup. Exporting a report is independent of publication.
 
 ## 9. Delivery phases and acceptance gates
 
 | Phase | Deliverable | Acceptance gate |
 |---|---|---|
 | 0: Discovery | Installed product/version inventory, API catalog scope, environment ownership, representative tickets | Each integration has authoritative docs/spec source and unresolved gaps recorded |
-| 1: Foundation | Java modules, application API, AD/Delinea login and secret-ID resolution, run persistence, tool dispatcher, basic UI | User can log in and invoke an allowed tool via its secret ID; forbidden secrets and cross-user access rejected; expiry/logout handled; credential-leakage checks pass |
+| 1: Foundation | Java modules, application API, AD/Delinea login and secret-ID resolution, persistent H2, tool dispatcher, vanilla HTML/CSS/JS UI | User can log in and invoke an allowed tool via its secret ID; forbidden secrets and cross-user access rejected; restart persistence and expiry/logout verified; credential-leakage checks pass |
 | 2: Read-only analysis | Jira, Bitbucket, artifact and knowledge retrieval; structured plan | Representative tickets produce traceable plans and identify ambiguous builds/requirements |
 | 3: Executable vertical slice | One service, Sandbox, deployment/config change, SMTP input and evidence | Complete a real scenario and restore environment; recover from worker failure and cancellation |
-| 4: SDET pilot | Reports, observability, failure investigation, regression cases | SDETs compare results against known outcomes; measure false passes, false failures, coverage and cleanup reliability |
+| 4: SDET pilot | Readable execution reports, live feedback, observability, failure investigation, regression cases, approved Jira/wiki publication | SDETs can reconstruct results from evidence; publication requires exact-payload approval; measure false passes, false failures, coverage and cleanup reliability |
 | 5: Broad API completion | Remaining operation families, services, environments and provider adapters | Every agreed catalog operation implemented/tested or explicitly recorded as a pending scope exception |
 | 6: Operational rollout | Monitoring, recovery drills, ownership, retention and maintenance process | Agreed quality targets met for eligible ticket classes; ongoing API drift detection in place |
 
@@ -345,6 +375,7 @@ Consulted 20 October 2026. Pin the matching installed versions during discovery;
 - Confluence Data Center REST, only if the wiki is Confluence: https://developer.atlassian.com/server/confluence/rest/
 - Kubernetes API overview/discovery: https://kubernetes.io/docs/reference/using-api/
 - Helm command reference: https://helm.sh/docs/helm/
+- H2 persistence and connection modes: https://h2database.com/html/features.html
 - Delinea Secret Server token authentication (version-specific example; match installed version): https://docs.delinea.com/online-help/secret-server-11-7-x/api-scripting/authentication/script-token-auth/index.htm
 - Delinea-maintained SDK with domain-password authorization examples (reference for behavior, not a requirement to use Python): https://github.com/DelineaXPM/python-tss-sdk
 

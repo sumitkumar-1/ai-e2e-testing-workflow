@@ -10,7 +10,7 @@ The current repository is the planning handoff. The user asked to publish it for
 
 ## Agreed constraints
 
-1. Java is the backend language. Spring Boot, Maven, React/TypeScript, PostgreSQL and a durable workflow engine are proposed defaults, not all user-mandated selections.
+1. Java is the backend language; Spring Boot and Maven are proposed defaults. The user explicitly wants HTML/CSS/vanilla JavaScript to minimize office restrictions on unapproved libraries. No React, frontend framework, external CDN or mandatory npm build. Use persistent H2 initially instead of requiring PostgreSQL. Start with one backend owning the database and a durable Java state machine; workers access it through application APIs.
 2. MCP was discussed and deliberately made optional. Direct Java services exposed through an application tool registry are sufficient. Do not introduce MCP as a required foundation.
 3. Tools work independently of AI. A dispatcher maps model-requested tool names and business arguments to authorized Java operations.
 4. The application prompts for AD username/password. The backend obtains a user-scoped Delinea Secret Server token using the organization's supported authentication flow, including MFA if configured. Verify actual deployment behavior before implementing the exchange.
@@ -20,6 +20,9 @@ The current repository is the planning handoff. The user asked to publish it for
 8. Broad API coverage is explicitly requested. Build a versioned endpoint catalog and track implementation/test coverage; an initial vertical slice is not completion of that goal.
 9. Expected behavior comes from requirements and contracts. Do not let the implementation under test define its own correctness.
 10. Reports distinguish PASS, FAIL, BLOCKED, NOT_TESTED and NEEDS_REVIEW, and link conclusions to evidence. Cleanup has its own recorded outcome.
+11. The UI must be modern, intuitive, accessible and responsive despite using vanilla technologies. Give clear live phase/status feedback, actionable errors, reconnect/cancel states and expandable technical detail.
+12. Each execution shows what actually ran, why, sanitized inputs, targets, timings, responses, retries, expected/observed outcomes and how the evidence supports the result. This is an execution audit, not hidden model reasoning.
+13. Jira comments and wiki writes require explicit user approval of the exact previewed content and destination. The user may edit drafts. No automatic publication based on AI choice or standing team policy; changes require renewed approval and retries must avoid duplicate writes.
 
 ## Confirmed environment context
 
@@ -66,6 +69,9 @@ Next connect real read-only ticket/PR/artifact operations, then one Sandbox depl
 - Recover a run after worker interruption without duplicating side effects.
 - Handle token expiry and logout without privileged fallback; report blocked cleanup.
 - Produce criterion-to-evidence reports with exact build/configuration context.
+- Demonstrate H2 persistence/recovery across restart and local backup/restore without a PostgreSQL dependency.
+- Demonstrate the vanilla UI's live feedback, readable execution detail, accessibility and error states.
+- Demonstrate Jira/wiki preview and explicit approval; block unapproved writes and handle conflicts/uncertain publication without duplicates.
 - Keep documentation truthful about what is mocked, implemented, contract-tested and live-validated.
 
 No private endpoints or live product integrations have been inspected in creating these documents. The full plan contains the official public documentation baseline and staged acceptance gates.
