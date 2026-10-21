@@ -1,0 +1,14 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+*.local.yml
+*.local.yaml
+*.local.properties
+target/
+node_modules/
+dist/
+.idea/
+*.iml
+runtime-secrets/
+local-evidence/
